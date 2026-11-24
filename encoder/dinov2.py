@@ -2,18 +2,16 @@ from typing import override
 from pathlib import Path
 from PIL import Image
 import torch
-from transformers import AutoImageProcessor
-
-from visual_encoder import VisualEncoder
-from .modeling_dinov2 import Dinov2Model
+from transformers import AutoImageProcessor, Dinov2Model
+from .types import VisualEncoder
 
 
 class DINOv2Encoder(VisualEncoder):
     model_id = "facebook/dinov2-giant"
     
     def __init__(self):
-        self.processor = AutoImageProcessor.from_pretrained(self.model_id, use_fast=True)
-        self.model = Dinov2Model.from_pretrained(self.model_id, device_map="cuda")
+        self.processor = AutoImageProcessor.from_pretrained(self.model_id)
+        self.model: Dinov2Model = Dinov2Model.from_pretrained(self.model_id, device_map="auto")
         self.patch_size = self.model.config.patch_size
 
     @override

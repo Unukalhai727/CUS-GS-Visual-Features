@@ -2,10 +2,8 @@ from typing import override
 from pathlib import Path
 from PIL import Image
 import torch
-from transformers import AutoProcessor
-
-from visual_encoder import VisualEncoder
-from .modeling_mllama import MllamaForConditionalGeneration
+from transformers import AutoProcessor, MllamaModel
+from .types import VisualEncoder
 
 
 class LlaMaVEncoder(VisualEncoder):
@@ -20,7 +18,7 @@ class LlaMaVEncoder(VisualEncoder):
 
     def __init__(self):
         self.processor = AutoProcessor.from_pretrained(self.model_id)
-        self.model = MllamaForConditionalGeneration.from_pretrained(self.model_id, device_map="auto")
+        self.model = MllamaModel.from_pretrained(self.model_id, device_map="auto")
 
     @override
     @torch.inference_mode()
@@ -32,13 +30,10 @@ class LlaMaVEncoder(VisualEncoder):
             pixel_values=inputs.pixel_values,
             aspect_ratio_ids=inputs.aspect_ratio_ids,
             aspect_ratio_mask=inputs.aspect_ratio_mask,
-            output_hidden_states=False,
-            output_attentions=False,
-            return_dict=True
-        )[0]
+        ).last_hidden_state
         cross_attention_states = self.model.multi_modal_projector(outputs)
-        img_ = cross_attention_states.view(-1, outputs.shape[3], self.model.hidden_size)[:, 1:, :].view(4, 40, 40, 4096)
-        embedding = torch.zeros(80, 80, 4096, device="cuda")
+        img_ = cross_attention_states.view(-1, outputs.shape[3], self.model.hidden_size)[:, 1:, :].view(4, 40, 40, self.model.hidden_size)
+        embedding = cross_attention_states.new_zeros((80, 80, self.model.hidden_size))
         embedding[:40, :40] = img_[0, :]
         embedding[:40, 40:] = img_[1, :]
         embedding[40:, :40] = img_[2, :]

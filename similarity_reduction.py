@@ -1,7 +1,14 @@
 from pathlib import Path
 import torch
-import torch.nn.functional as F
 from tqdm import tqdm
+
+
+ENCODERS_CFG: dict[str, int] = {
+    "clip": 80,
+    "siglip": 85,
+    "dinov2": 75,
+    "llamav": 60,
+}
 
 def similarity_reduction(embedding: torch.Tensor, threshold: float, chunk_size=1000, desc="") -> torch.Tensor:
     with torch.no_grad():
@@ -19,36 +26,27 @@ def similarity_reduction(embedding: torch.Tensor, threshold: float, chunk_size=1
                         used_mask[similar_indices] = True
         return embedding[filtered_indices]
 
-if __name__=="__main__":
-    root = Path("/home/fcx/projects/Undefined-GS/data/m3")
-    scenes = ["train"]
-    llm_cfg = [
-        # ("clip", 100, False),
-        # ("siglip", 100, False),
-        # ("dinov2", 75, False),
-        ("seem_u", 100, False),
-        # ("llama3", 100, False),
-        # ("llamav", 60, True),
-        # ("clip_ii", 100, False),
-        # ("siglip_i", 100, False),
-        # ("llamav_i", 60, True),
-    ]
+def run(name: str, scene: Path, threshold: int):
+    dst = scene / "features" / name / f"mb{threshold}.pth"
+    emb_dir = scene / "features" / name / "embeds"
 
-    for scene in scenes:
-        for llm, threshold, is_downsample in llm_cfg:
-            dst = root / scene / "llms" / llm / f"mb{threshold}.pth"
-            # if dst.exists():
-            #     print(f"Reduced embedding for {scene} - {llm} with threshold {threshold} already exists. Skipping.")
-            #     continue
-            print(f"")
-            embed_dir = root / scene / "llms" / llm / "embeds"
-            embeddings = []
-            for emb_file in embed_dir.iterdir():
-                embedding = torch.load(emb_file, map_location="cuda") # [H, W, C]
-                if is_downsample:
-                    embedding = F.interpolate(embedding.permute(2,0,1).unsqueeze(0), size=(embedding.shape[0]//2, embedding.shape[1]//2), mode='bilinear', align_corners=False).squeeze(0).permute(1,2,0)
-                embedding = embedding.view(-1, embedding.shape[-1]) # [H, W, C] -> [H*W, C]
-                embeddings.append(embedding)
-            embeddings = torch.cat(embeddings, dim=0) # [N, C]
-            reduced_embedding = similarity_reduction(embeddings, threshold=threshold / 100, desc=f"{scene}/{llm}/mb{threshold}")
-            torch.save(reduced_embedding.to(device="cpu", dtype=torch.bfloat16), dst)
+    emb_list: list[torch.Tensor] = []
+    for emb_file in emb_dir.iterdir():
+        emb = torch.load(emb_file, map_location="cuda") # [H, W, C]
+        emb = emb.view(-1, emb.shape[-1]) # [H, W, C] -> [H*W, C]
+        emb_list.append(emb)
+
+    embedding = torch.cat(emb_list, dim=0) # [N, C]
+    reduced_embedding = similarity_reduction(embedding, threshold=threshold / 100, desc=f"{scene.name}::{name}")
+    torch.save(reduced_embedding.to(device="cpu", dtype=torch.bfloat16), dst)
+
+if __name__ == "__main__":
+    from argparse import ArgumentParser
+
+    parser = ArgumentParser()
+    parser.add_argument("-s", "--scene", type=Path, required=True, help="Scene name")
+    parser.add_argument("-e", "--encoder", type=str, required=True, choices=ENCODERS_CFG, help="Encoder name")
+    args = parser.parse_args()
+
+    threshold = ENCODERS_CFG[args.encoder]
+    run(args.encoder, args.scene, threshold)
