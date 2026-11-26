@@ -2,7 +2,7 @@ from pathlib import Path
 import torch
 from tqdm import tqdm
 
-from algorithm import similarity_reduction
+from algorithm import SimilarityReducer
 from config import Config
 
 
@@ -12,19 +12,14 @@ def main(name: str, scene: Path):
 
     encoder = Config.encoders[name].cls()
     threshold = Config.encoders[name].threshold
+    reducer = SimilarityReducer(threshold=threshold)
 
-    embedding_list: list[torch.Tensor] = []
     for image_path in tqdm(sorted((scene / "images").iterdir()), desc=f"{scene.name}::{name}", ncols=120):
         embedding = encoder(image_path)
-        embedding_list.append(embedding.view(-1, embedding.shape[-1]))
+        reducer(embedding)
         torch.save(embedding, embedding_dir / f"{image_path.stem}.pth")
 
-    flattened_embedding = torch.cat(embedding_list, dim=0)
-    del encoder, embedding, embedding_list
-    torch.cuda.empty_cache()
-
-    reduced_embedding = similarity_reduction(flattened_embedding.cuda(), threshold=threshold, desc=f"{scene.name}::{name}").cpu()
-    torch.save(reduced_embedding, embedding_dir.parent / f"mb{int(threshold * 100)}.pth")
+    torch.save(reducer.result, embedding_dir.parent / f"mb{int(threshold * 100)}.pth")
 
 
 if __name__ == "__main__":
